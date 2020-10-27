@@ -272,6 +272,9 @@ void SetupLoRa(int freq, int sf)
 	}
 
 	opmode(OPMODE_SLEEP);
+	delay(15);
+	// entry LoRa mode Required to Bandwidth, Coding Rate, Spread Factor
+	opmodeLora();  
 
 	// set frequency
 	uint64_t frf = ((uint64_t)freq << 19) / 32000000;
@@ -309,7 +312,6 @@ void SetupLoRa(int freq, int sf)
 	writeReg(REG_FIFO_ADDR_PTR, readReg(REG_FIFO_RX_BASE_AD));
 
 	writeReg(REG_LNA, LNA_MAX_GAIN);
-
 }
 
 boolean receive(char *payload) {
@@ -403,9 +405,8 @@ void receivepacket() {
 			printf("\n");
 			printf("Payload: %s\n", message);
 
-		} // received a message
-
-	} // dio0=1
+		}
+	}
 }
 
 void receivepacket2(char * buffer, int * receivedbytes, int * prssi, int * rssi, long int *snr, int *error) {
@@ -440,20 +441,12 @@ void receivepacket2(char * buffer, int * receivedbytes, int * prssi, int * rssi,
 
 			*prssi =  readReg(0x1A)-rssicorr;
 			*rssi = readReg(0x1B)-rssicorr;
-
-			//printf("Packet RSSI: %d, ", *prssi);
-			//printf("RSSI: %d, ", *rssi);
-			//printf("SNR: %li, ", *snr);
-			//printf("Length: %i", *receivedbytes);
-			//printf("\n");
-			//printf("Payload: %s\n", buffer);
-
-		} // received a message
+		}
 		else {
 			//CRC error
 			*error = ret;
 		}
-	} // dio0=1
+	}
 	else{
 		*receivedbytes = 0;
 		*prssi = 0;
@@ -498,7 +491,7 @@ static void writeBuf(byte addr, byte *value, byte len) {
 }
 
 void txlora(byte *frame, byte datalen) {
-
+	writeReg(REG_HOP_PERIOD,0x00);
 	// set the IRQ mapping DIO0=TxDone DIO1=NOP DIO2=NOP
 	writeReg(RegDioMapping1, MAP_DIO0_LORA_TXDONE|MAP_DIO1_LORA_NOP|MAP_DIO2_LORA_NOP);
 	// clear all radio IRQ flags
@@ -515,12 +508,9 @@ void txlora(byte *frame, byte datalen) {
 	writeBuf(REG_FIFO, frame, datalen);
 	// now we actually start the transmission
 	opmode(OPMODE_TX);
-
-	//printf("send: %s\n", frame);
 }
 
 int main (int argc, char *argv[]) {
-
 	if (argc < 2) {
 		printf ("Usage: argv[0] sender|rec [message]\n");
 		exit(1);
@@ -555,7 +545,6 @@ int main (int argc, char *argv[]) {
 			delay(5000);
 		}
 	} else {
-
 		// radio init
 		opmodeLora();
 		opmode(OPMODE_STANDBY);
@@ -566,7 +555,6 @@ int main (int argc, char *argv[]) {
 			receivepacket(); 
 			delay(1);
 		}
-
 	}
 
 	return (0);
@@ -585,14 +573,6 @@ static PyObject* send(PyObject* self, PyObject* args)
 		return NULL;
 	}
 
-	/*
-	printf("Sending (%d)aaa: %*s\r\n", size, size, buffer);
-	printf("Hex:\r\n");
-	for(int i = 0; i < size; ++i){
-		printf("\\x%x", buffer[i]);
-	}
-	*/
-
 	txlora((byte *)buffer, size);
 
 	return PyLong_FromLong(0);
@@ -610,8 +590,6 @@ static PyObject* recv(PyObject* self, PyObject* args)
 
 	receivepacket2(buffer, &receivedbytes, &prssi, &rssi, &snr, &error);
 
-	//	return PyByteArray_FromStringAndSize(buffer, 11);
-	//	return PyUnicode_FromStringAndSize(buffer, 11);
 	return Py_BuildValue("y#iiiii", buffer, receivedbytes, receivedbytes, prssi, rssi, snr, error);
 }
 
@@ -648,16 +626,7 @@ static PyObject* init(PyObject* self, PyObject* args)
 
 	//set up SPI
 	wiringPiSPISetup(CHANNEL, 500000);
-
 	SetupLoRa(freq, sf);
-
-	//printf("Starting as (%d) ", mode);
-	//if( mode == 0){
-	//	printf("transmitter\r\n");
-	//}else{
-	//	printf("receiver\r\n");
-	//}
-	//printf("SF%d on %.6lf MHz\r\n", sf, (double)freq/1000000);
 
 	//sender
 	if (mode == 0) {
@@ -670,14 +639,10 @@ static PyObject* init(PyObject* self, PyObject* args)
 		configPower(23);
 
 	} else {
-
 		// radio init
 		opmodeLora();
 		opmode(OPMODE_STANDBY);
 		opmode(OPMODE_RX);
-		//printf("Listening at SF%i on %.6lf Mhz.\n", sf,(double)freq/1000000);
-		//printf("------------------\n");
-
 	}
 
 	return PyLong_FromLong(0);

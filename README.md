@@ -55,16 +55,16 @@ Takes 1 parameter:
 The module has to be connected to the Raspberry Pi according to the 
 table below
 
-|RFM95W pin | Raspberry Pi pin | Description|
+|RFM95W pin | Raspberry Pi pin    | Description                   |
 |-|-|-|
-|3.3V	 | 3V3 | 3V3 power supply |
-|GND     | GND | power ground     |
+|3.3V	   | 3V3, pin 1             | 3V3 power supply              |
+|GND     | GND, pin 6             | power ground                  |
 |MISO    | GPIO 9 (MISO), pin 21  | SPI Master Input Slave Output |
 |MOSI    | GPIO 10 (MOSI), pin 19 | SPI Master Output Slave Input |
 |SCK     | GPIO 11 (SCLK), pin 23 | SPI clock                     |
-|NSS     | GPIO 6, pin 31         | SPI chip select               |
-|RESET   | GPIO (ID_SD), pin 27   | LoRa module reset             |
-|DIO0    | GPIO 7 (CE1), pin 26   | LoRa status line              |
+|NSS     | GPIO 25, pin 22        | SPI chip select               |
+|RESET   | GPIO 17, pin 11        | LoRa module reset             |
+|DIO0    | GPIO 4 (GPCLK0), pin 7 | LoRa status line              |
 
 # Compilation
 
@@ -73,6 +73,7 @@ This can be configured through *PYTHONVER* variable.
 
 Additionally *wiringpi* library is used. Install it before 
 compilation with
+
 ```bash
 sudo apt install wiringpi
 ```
@@ -102,14 +103,19 @@ Navigate through the menu, enable SPI and restart RPi.
 
 ## Receiver:
 
+Configuration fo a simple receiver at 868MHz freqency.
+
 ```Python
 import loralib
 loralib.init(1, 868000000, 7)
 data=loralib.recv();
-(b'hello', 5, -25, -94, 9, 0)
+data
+>>> (b'hello', 5, -25, -94, 9, 0)
 ```
 
 ### Receiver in a loop
+
+Configuration of a receiver in a loop.
 
 ```Python
 import loralib
@@ -118,11 +124,14 @@ import time
 loralib.init(1, 868000000, 7)
 
 for i in range(0,10000000):
-  a=loralib.recv()
+  msg=loralib.recv()
   print("%06d, frame=" % i, end='')
-  print(a)
+  print(msg)
   time.sleep(1)    
 ```
+
+Configuration of a receiver in a loop with high frequency check 
+and verification of message size and CRC.
 
 ```Python
 import loralib
@@ -133,11 +142,13 @@ loralib.init(1, 868000000, 7)
 for i in range(0,10000000):
   msg=loralib.recv()
   if msg[5] == 0 and msg[1] > 0:
-    msg(a)
+    print(msg)
   time.sleep(0.001)    
 ```
   
 ## Transmitter:
+
+Transmitter sending a string "hello".
 
 ```Python
 import loralib                                                          
