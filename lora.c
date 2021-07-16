@@ -179,10 +179,14 @@ int dio0  = 7;
 int RST   = 0;
 
 // Set spreading factor (SF7 - SF12)
-sf_t sf = SF7;
+sf_t lora_sf = SF7;
 
 // Set center frequency
-uint32_t  freq = 869000000; // in Mhz! (868.1)
+uint32_t  lora_freq = 869000000; // in Mhz! (868.1)
+
+#define LORA_TRANSMITTER		0
+#define LORA_RECEIVER			1
+byte lora_mode = LORA_RECEIVER;
 
 byte hello[32] = "HELLO";
 
@@ -251,7 +255,7 @@ void SetupLoRa(int freq, int sf)
 
 	if (version == 0x22) {
 		// sx1272
-		printf("SX1272 detected, starting.\n");
+		// printf("SX1272 detected, starting.\n");
 		sx1272 = true;
 	} else {
 		// sx1276?
@@ -262,10 +266,10 @@ void SetupLoRa(int freq, int sf)
 		version = readReg(REG_VERSION);
 		if (version == 0x12) {
 			// sx1276
-			printf("SX1276 detected, starting.\n");
+			// printf("SX1276 detected, starting.\n");
 			sx1272 = false;
 		} else {
-			printf("Unrecognized transceiver.\n");
+			// printf("Unrecognized transceiver.\n");
 			//printf("Version: 0x%x\n",version);
 			exit(1);
 		}
@@ -323,7 +327,7 @@ boolean receive(char *payload) {
 	//  payload crc: 0x20
 	if((irqflags & 0x20) == 0x20)
 	{
-		printf("CRC error\n");
+		//printf("CRC error\n");
 		writeReg(REG_IRQ_FLAGS, 0x20);
 		return false;
 	} else {
@@ -523,7 +527,7 @@ int main (int argc, char *argv[]) {
 
 	wiringPiSPISetup(CHANNEL, 500000);
 
-	SetupLoRa(freq, sf);
+	SetupLoRa(lora_freq, lora_sf);
 
 	if (!strcmp("sender", argv[1])) {
 		opmodeLora();
@@ -534,7 +538,7 @@ int main (int argc, char *argv[]) {
 
 		configPower(23);
 
-		printf("Send packets at SF%i on %.6lf Mhz.\n", sf,(double)freq/1000000);
+		printf("Send packets at SF%i on %.6lf Mhz.\n", lora_sf,(double)lora_freq/1000000);
 		printf("------------------\n");
 
 		if (argc > 2)
@@ -549,7 +553,7 @@ int main (int argc, char *argv[]) {
 		opmodeLora();
 		opmode(OPMODE_STANDBY);
 		opmode(OPMODE_RX);
-		printf("Listening at SF%i on %.6lf Mhz.\n", sf,(double)freq/1000000);
+		printf("Listening at SF%i on %.6lf Mhz.\n", lora_sf,(double)lora_freq/1000000);
 		printf("------------------\n");
 		while(1) {
 			receivepacket(); 
@@ -645,6 +649,49 @@ static PyObject* init(PyObject* self, PyObject* args)
 		opmode(OPMODE_RX);
 	}
 
+	lora_freq = freq;
+	lora_sf = (sf_t)sf;
+	lora_mode = mode;
+
+	return PyLong_FromLong(0);
+}
+
+static PyObject* mode(PyObject* self, PyObject* args)
+{
+	int mode;
+
+	if (!PyArg_ParseTuple(args, "i", &mode))
+		return NULL;
+
+
+	if(!(mode == 0 || mode == 1))
+	{
+		printf("Bad mode. Should be 0 (sender) or 1 (receiver) \r\n");
+		PyErr_SetString(LoraError, "Bad mode. Should be 0 (sender) or 1 (receiver)");
+		return NULL;
+	}
+
+	SetupLoRa(lora_freq, lora_sf);
+
+	//sender
+	if (mode == 0) {
+		opmodeLora();
+		// enter standby mode (required for FIFO loading))
+		opmode(OPMODE_STANDBY);
+
+		writeReg(RegPaRamp, (readReg(RegPaRamp) & 0xF0) | 0x08); // set PA ramp-up time 50 uSec
+
+		configPower(23);
+
+	} else {
+		// radio init
+		opmodeLora();
+		opmode(OPMODE_STANDBY);
+		opmode(OPMODE_RX);
+	}
+
+	lora_mode = mode;
+
 	return PyLong_FromLong(0);
 }
 
@@ -653,6 +700,7 @@ static PyMethodDef LoraMethods[] = {
 	{"init",  init, METH_VARARGS, "Initialization"},
 	{"send",  send, METH_VARARGS, "Send data"},
 	{"recv",  recv, METH_VARARGS, "Receive data"},
+	{"mode",  mode, METH_VARARGS, "Set mode"},
 	{NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
