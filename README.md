@@ -13,24 +13,32 @@ Additional information on how to use the driver can be found on
 
 # API Documentation
 
-The Python wrapper for a LoRa module offers three functions
+The Python wrapper for a LoRa module offers the following functions:
 - init()
 - recv()
 - send()
+- mode()
+- txdone()
 
-## init(mode, frequency, spread_factor)
+## Constants
 
-Initializes LoRa module. Has to be invoked every time 
+- `SYNC_WORD_FACTORY` (0x12) — default LoRa sync word
+- `SYNC_WORD_LORAWAN` (0x34) — reserved for LoRaWAN networks
+
+## init(mode, frequency, spread_factor, sync_word=SYNC_WORD_FACTORY)
+
+Initializes LoRa module. Has to be invoked every time
 when the mode (transmitter/receiver) is being changed.
 
-Takes 3 arguments:
+Takes 3 positional arguments and 1 optional keyword argument:
 - **mode** (0 for transmitter, 1 for receiver),
 - **frequency** expressed in Hertz (make sure the LoRa module is compatible with selected frequency),
 - **spread_factor** Lora spread factor, available are 7, 8, 9, 10, 11 or 12.
+- **sync_word** (optional) LoRa sync word, defaults to `SYNC_WORD_FACTORY`.
 
 Currently only bandwidth 125kHz and coding rate 4/5 are supported.
 
-Returns 0 on success. 
+Returns 0 on success.
 
 ## recv()
 
@@ -48,7 +56,18 @@ If no data was received the second element of the tuplet is set to 0.
 ## send(data)
 
 Takes 1 parameter:
-- **data** byte array to be send.
+- **data** byte array to be send (max 255 bytes).
+
+## mode(mode)
+
+Changes the LoRa module mode without reinitializing. Takes 1 argument:
+- **mode** (0 for transmitter, 1 for receiver).
+
+Returns 0 on success.
+
+## txdone()
+
+Checks if the transmission is complete. Returns 1 if done, 0 otherwise.
 
 # Connection
 
