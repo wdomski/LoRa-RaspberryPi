@@ -101,14 +101,22 @@ sudo raspi-config
 
 Navigate through the menu, enable SPI and restart RPi.
 
+## Importing library
+
+Previously the library was called *loralib*, now the name has changed to *liblora*. To maintain the backward compatibility you can `import as`:
+
+```Python
+import liblora as loralib
+```
+
 ## Receiver:
 
 Configuration fo a simple receiver at 868MHz freqency.
 
 ```Python
-import loralib
-loralib.init(1, 868000000, 7)
-data=loralib.recv();
+import liblora
+liblora.init(1, 868000000, 7)
+data=liblora.recv()
 data
 >>> (b'hello', 5, -25, -94, 9, 0)
 ```
@@ -118,13 +126,13 @@ data
 Configuration of a receiver in a loop.
 
 ```Python
-import loralib
+import liblora
 import time
 
-loralib.init(1, 868000000, 7)
+liblora.init(1, 868000000, 7)
 
 for i in range(0,10000000):
-  msg=loralib.recv()
+  msg=liblora.recv()
   print("%06d, frame=" % i, end='')
   print(msg)
   time.sleep(1)    
@@ -134,13 +142,13 @@ Configuration of a receiver in a loop with high frequency check
 and verification of message size and CRC.
 
 ```Python
-import loralib
+import liblora
 import time
 
-loralib.init(1, 868000000, 7)
+liblora.init(1, 868000000, 7)
 
 for i in range(0,10000000):
-  msg=loralib.recv()
+  msg=liblora.recv()
   if msg[5] == 0 and msg[1] > 0:
     print(msg)
   time.sleep(0.001)    
@@ -151,11 +159,46 @@ for i in range(0,10000000):
 Transmitter sending a string "hello".
 
 ```Python
-import loralib                                                          
-loralib.init(0, 868000000, 7)                                           
-loralib.send(b'hello');
+import liblora
+liblora.init(0, 868000000, 7)
+liblora.send(b'hello')
 ```
 
+# Docker
 
+To use the Docker container, build it with:
 
+```bash
+docker build -t lora .
+```
 
+Then run the container with:
+
+```bash
+docker run -d --device /dev/gpiomem0 --device /dev/spidev0.0 --name lora -t lora
+```
+
+If device flags are not provided you may face similar errors like:
+
+```bash
+Python 3.13.11 (main, Jan 13 2026, 06:04:09) [GCC 14.2.0] on linux
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import liblora
+>>> liblora.init(1, 868000000, 7)
+wiringPiSetup: Unable to open /sys/bus/pci/devices/0002:01:00.0/resource1 or /dev/gpiomem0: No such file or directory.
+  Aborting your program because if it can not access the GPIO
+  hardware then it most certianly won't work
+  Try running with sudo?
+```
+
+```bash
+Python 3.13.11 (main, Jan 13 2026, 06:04:09) [GCC 14.2.0] on linux
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import liblora
+>>> liblora.init(1, 868000000, 7)
+Unable to open SPI device /dev/spidev0.0: No such file or directory
+```
+
+## WiringPi library
+
+The lora driver strongly relies on the WiringPi library. Make sure the library is installed and available. Currently, you need to install it from sources or use precompiled deb package as shown in the Dockerfile. For details refere to [WiringPi GitHub repository](https://github.com/WiringPi/WiringPi/)

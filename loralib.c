@@ -13,19 +13,18 @@
  *
  *******************************************************************************/
 
+#define PY_SSIZE_T_CLEAN
+
 #ifdef PYTHONMODULE
 #include <Python.h>
 #endif
 
-#include <string>
 #include <stdio.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
 #include <string.h>
-#include <sys/time.h>
-#include <signal.h>
 #include <stdlib.h>
+#include <stdbool.h>
+#include <unistd.h>
+#include <stdint.h>
 
 #include <sys/ioctl.h>
 
@@ -57,8 +56,18 @@
 #define REG_HOP_PERIOD              0x24
 #define REG_SYNC_WORD				0x39
 #define REG_VERSION	  				0x42
+#define REG_PA_DAC  				0x4D
 
-#define PAYLOAD_LENGTH              0x40
+#define PAYLOAD_LENGTH              0x80
+
+#define SYNC_WORD_FACTORY        0x12  // default SyncWord for LoRa module
+#define SYNC_WORD_LORAWAN        0x34  // reserved for LoRaWAN networks
+
+#ifdef PYTHONMODULE
+// Exported as module-level constants
+static const unsigned char py_SYNC_WORD_FACTORY = SYNC_WORD_FACTORY;
+static const unsigned char py_SYNC_WORD_LORAWAN = SYNC_WORD_LORAWAN;
+#endif
 
 // LOW NOISE AMPLIFIER
 #define REG_LNA                     0x0C
@@ -151,6 +160,9 @@
 #define MAP_DIO1_LORA_NOP      0x30  // --11----
 #define MAP_DIO2_LORA_NOP      0xC0  // ----11--
 
+#define PA_HIGH_POWER  				0x87
+#define PA_DEFAULT  				0x84
+
 // #############################################
 // #############################################
 //
@@ -179,10 +191,17 @@ int dio0  = 7;
 int RST   = 0;
 
 // Set spreading factor (SF7 - SF12)
-sf_t sf = SF7;
+enum sf_t lora_sf = SF7;
 
 // Set center frequency
-uint32_t  freq = 869000000; // in Mhz! (868.1)
+uint32_t  lora_freq = 869000000; // in Mhz! (868.1)
+
+// Set Sync Word
+unsigned char lora_sync_word = SYNC_WORD_FACTORY;
+
+#define LORA_TRANSMITTER		0
+#define LORA_RECEIVER			1
+byte lora_mode = LORA_RECEIVER;
 
 byte hello[32] = "HELLO";
 
@@ -233,44 +252,44 @@ static void opmode (uint8_t mode) {
 
 static void opmodeLora() {
 	uint8_t u = OPMODE_LORA;
-	if (sx1272 == false)
+	if (sx1272 == false){
 		u |= 0x8;   // TBD: sx1276 high freq
+	}
 	writeReg(REG_OPMODE, u);
 }
 
-
-void SetupLoRa(int freq, int sf)
+void resetLoRa()
 {
-
 	digitalWrite(RST, HIGH);
 	delay(100);
 	digitalWrite(RST, LOW);
 	delay(100);
+	digitalWrite(RST, HIGH);
 
 	byte version = readReg(REG_VERSION);
 
-	if (version == 0x22) {
+	if (version == 0x22)
+	{
 		// sx1272
-		printf("SX1272 detected, starting.\n");
+		// printf("SX1272 detected, starting.\n");
 		sx1272 = true;
-	} else {
-		// sx1276?
-		digitalWrite(RST, LOW);
-		delay(100);
-		digitalWrite(RST, HIGH);
-		delay(100);
-		version = readReg(REG_VERSION);
-		if (version == 0x12) {
-			// sx1276
-			printf("SX1276 detected, starting.\n");
-			sx1272 = false;
-		} else {
-			printf("Unrecognized transceiver.\n");
-			//printf("Version: 0x%x\n",version);
-			exit(1);
-		}
 	}
+	else if (version == 0x12)
+	{
+		// sx1276
+		// printf("SX1276 detected, starting.\n");
+		sx1272 = false;
+	}
+	else
+	{
+		// printf("Unrecognized transceiver.\n");
+		// printf("Version: 0x%x\n",version);
+		exit(1);
+	}
+}
 
+void SetupLoRa(int freq, int sf, unsigned char sync_word)
+{
 	opmode(OPMODE_SLEEP);
 	delay(15);
 	// entry LoRa mode Required to Bandwidth, Coding Rate, Spread Factor
@@ -282,7 +301,7 @@ void SetupLoRa(int freq, int sf)
 	writeReg(REG_FRF_MID, (uint8_t)(frf>> 8) );
 	writeReg(REG_FRF_LSB, (uint8_t)(frf>> 0) );
 
-	writeReg(REG_SYNC_WORD, 0x34); // LoRaWAN public sync word
+	writeReg(REG_SYNC_WORD, sync_word); // LoRaWAN public sync word
 
 	if (sx1272) {
 		if (sf == SF11 || sf == SF12) {
@@ -308,10 +327,17 @@ void SetupLoRa(int freq, int sf)
 	}
 	writeReg(REG_MAX_PAYLOAD_LENGTH,0x80);
 	writeReg(REG_PAYLOAD_LENGTH,PAYLOAD_LENGTH);
-	writeReg(REG_HOP_PERIOD,0xFF);
-	writeReg(REG_FIFO_ADDR_PTR, readReg(REG_FIFO_RX_BASE_AD));
+	// writeReg(REG_HOP_PERIOD,0xFF);
+	// writeReg(REG_FIFO_ADDR_PTR, readReg(REG_FIFO_RX_BASE_AD));
+
+	writeReg(0x0B,0x0B);
+	writeReg(0x0C,0x23);
+	writeReg(0x20,0x00);
+	writeReg(0x21,8);
+	writeReg(REG_IRQ_FLAGS, 0xFF);
 
 	writeReg(REG_LNA, LNA_MAX_GAIN);
+	opmode(OPMODE_STANDBY);
 }
 
 boolean receive(char *payload) {
@@ -323,7 +349,7 @@ boolean receive(char *payload) {
 	//  payload crc: 0x20
 	if((irqflags & 0x20) == 0x20)
 	{
-		printf("CRC error\n");
+		//printf("CRC error\n");
 		writeReg(REG_IRQ_FLAGS, 0x20);
 		return false;
 	} else {
@@ -478,6 +504,42 @@ static void configPower (int8_t pw) {
 	}
 }
 
+int modeLoRa(int mode)
+{
+	// sender
+	if (mode == 0)
+	{
+		// opmodeLora();
+		// enter standby mode (required for FIFO loading))
+		// opmode(OPMODE_STANDBY);
+		writeReg(REG_PA_DAC, PA_HIGH_POWER);
+		writeReg(REG_HOP_PERIOD, 0x00);
+		writeReg(REG_DIO_MAPPING_1, 0x41);
+		writeReg(REG_IRQ_FLAGS, 0xFF);
+		writeReg(REG_IRQ_FLAGS_MASK, 0xF7);
+		writeReg(REG_PAYLOAD_LENGTH, PAYLOAD_LENGTH);
+
+		// writeReg(RegPaRamp, (readReg(RegPaRamp) & 0xF0) | 0x08); // set PA ramp-up time 50 uSec
+		writeReg(REG_FIFO_ADDR_PTR, readReg(REG_FIFO_TX_BASE_AD));
+
+		configPower(23);
+	}
+	else
+	{
+		// radio init
+		writeReg(REG_PA_DAC, PA_DEFAULT);
+		writeReg(REG_HOP_PERIOD, 0xFF);
+		writeReg(REG_DIO_MAPPING_1, 0x01);
+		writeReg(REG_IRQ_FLAGS_MASK, 0x3F);
+		writeReg(REG_IRQ_FLAGS, 0xFF);
+		writeReg(REG_PAYLOAD_LENGTH, PAYLOAD_LENGTH);
+
+		writeReg(REG_FIFO_ADDR_PTR, readReg(REG_FIFO_RX_BASE_AD));
+		writeReg(REG_OPMODE, OPMODE_LORA | OPMODE_RX);
+	}
+
+	return 0;
+}
 
 static void writeBuf(byte addr, byte *value, byte len) {                                                       
 	unsigned char spibuf[256];                                                                          
@@ -510,6 +572,22 @@ void txlora(byte *frame, byte datalen) {
 	opmode(OPMODE_TX);
 }
 
+int istxdone() {
+	if(digitalRead(dio0) == 1)
+	{
+		//get all IRQ flags
+		readReg(REG_IRQ_FLAGS);
+		// clear all radio IRQ flags
+		writeReg(REG_IRQ_FLAGS, 0xFF);
+		// go to standby
+		opmode(OPMODE_STANDBY);
+		opmode(OPMODE_RX);
+
+		return 1;
+	}
+	return 0;
+}
+
 int main (int argc, char *argv[]) {
 	if (argc < 2) {
 		printf ("Usage: argv[0] sender|rec [message]\n");
@@ -523,7 +601,8 @@ int main (int argc, char *argv[]) {
 
 	wiringPiSPISetup(CHANNEL, 500000);
 
-	SetupLoRa(freq, sf);
+	resetLoRa();
+	SetupLoRa(lora_freq, lora_sf, lora_sync_word);
 
 	if (!strcmp("sender", argv[1])) {
 		opmodeLora();
@@ -534,7 +613,7 @@ int main (int argc, char *argv[]) {
 
 		configPower(23);
 
-		printf("Send packets at SF%i on %.6lf Mhz.\n", sf,(double)freq/1000000);
+		printf("Send packets at SF%i on %.6lf Mhz.\n", lora_sf,(double)lora_freq/1000000);
 		printf("------------------\n");
 
 		if (argc > 2)
@@ -549,7 +628,7 @@ int main (int argc, char *argv[]) {
 		opmodeLora();
 		opmode(OPMODE_STANDBY);
 		opmode(OPMODE_RX);
-		printf("Listening at SF%i on %.6lf Mhz.\n", sf,(double)freq/1000000);
+		printf("Listening at SF%i on %.6lf Mhz.\n", lora_sf,(double)lora_freq/1000000);
 		printf("------------------\n");
 		while(1) {
 			receivepacket(); 
@@ -567,13 +646,19 @@ static PyObject * LoraError;
 static PyObject* send(PyObject* self, PyObject* args)
 {
 	char * buffer;
-	int size;
+	Py_ssize_t size;
 
 	if (!PyArg_ParseTuple(args, "y#", &buffer, &size)){
 		return NULL;
 	}
 
-	txlora((byte *)buffer, size);
+	if (size > 255){
+		printf("Data too long to send. Max 255 bytes.\r\n");
+		PyErr_SetString(LoraError, "Data too long to send. Max 255 bytes.");
+		return NULL;
+	}
+
+	txlora((byte *)buffer, (byte)size);
 
 	return PyLong_FromLong(0);
 }
@@ -594,15 +679,19 @@ static PyObject* recv(PyObject* self, PyObject* args)
 }
 
 
-static PyObject* init(PyObject* self, PyObject* args)
+static PyObject* init(PyObject* self, PyObject* args, PyObject* kwargs)
 {
 	int mode;
 	int freq;
 	int sf;
+	unsigned char sync_word = SYNC_WORD_FACTORY;
+	int ret;
 
-	if (!PyArg_ParseTuple(args, "iii", &mode, &freq, &sf))
+	static char *kwlist[] = {"mode", "freq", "sf", "sync_word", NULL};
+
+	if (!PyArg_ParseTupleAndKeywords(args, kwargs, "iii|b", kwlist, &mode, &freq, &sf, &sync_word)) {
 		return NULL;
-
+	}
 
 	if(!(mode == 0 || mode == 1))
 	{
@@ -625,34 +714,66 @@ static PyObject* init(PyObject* self, PyObject* args)
 	pinMode(RST, OUTPUT);
 
 	//set up SPI
-	wiringPiSPISetup(CHANNEL, 500000);
-	SetupLoRa(freq, sf);
-
-	//sender
-	if (mode == 0) {
-		opmodeLora();
-		// enter standby mode (required for FIFO loading))
-		opmode(OPMODE_STANDBY);
-
-		writeReg(RegPaRamp, (readReg(RegPaRamp) & 0xF0) | 0x08); // set PA ramp-up time 50 uSec
-
-		configPower(23);
-
-	} else {
-		// radio init
-		opmodeLora();
-		opmode(OPMODE_STANDBY);
-		opmode(OPMODE_RX);
+	ret = wiringPiSPISetup(CHANNEL, 2000000);
+	if(ret == -1){
+		printf("SPI setup failed. Exiting...\r\n");
+		PyErr_SetString(LoraError, "SPI setup failed. Exiting...");
+		return NULL;
 	}
+	resetLoRa();
+	SetupLoRa(freq, sf, sync_word);
+	modeLoRa(mode);
+
+	lora_freq = freq;
+	lora_sf = (enum sf_t)sf;
+	lora_mode = mode;
+	lora_sync_word = sync_word;
 
 	return PyLong_FromLong(0);
 }
 
+static PyObject* mode(PyObject* self, PyObject* args)
+{
+	int mode;
+
+	if (!PyArg_ParseTuple(args, "i", &mode))
+		return NULL;
+
+
+	if(!(mode == 0 || mode == 1))
+	{
+		printf("Bad mode. Should be 0 (sender) or 1 (receiver) \r\n");
+		PyErr_SetString(LoraError, "Bad mode. Should be 0 (sender) or 1 (receiver)");
+		return NULL;
+	}
+
+	// resetLoRa();
+	SetupLoRa(lora_freq, lora_sf, lora_sync_word);
+	// after setup in standby mode
+
+	modeLoRa(mode);
+
+	lora_mode = mode;
+
+	return PyLong_FromLong(0);
+}
+
+static PyObject* txdone(PyObject* self, PyObject* args)
+{
+	int done;
+
+	done = istxdone();
+
+	return PyLong_FromLong(done);
+}
+
 
 static PyMethodDef LoraMethods[] = {
-	{"init",  init, METH_VARARGS, "Initialization"},
+	{"init",  (PyCFunction)init, METH_VARARGS | METH_KEYWORDS, "Initialization"},
 	{"send",  send, METH_VARARGS, "Send data"},
 	{"recv",  recv, METH_VARARGS, "Receive data"},
+	{"mode",  mode, METH_VARARGS, "Set mode"},
+	{"txdone",  txdone, METH_VARARGS, "TX done"},
 	{NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
@@ -666,7 +787,7 @@ static struct PyModuleDef loramodule = {
 };
 
 	PyMODINIT_FUNC
-PyInit_loralib(void)
+PyInit_liblora(void)
 {
 	PyObject *m;
 
@@ -675,6 +796,10 @@ PyInit_loralib(void)
 	LoraError = PyErr_NewException("lora.error", NULL, NULL);
 	Py_INCREF(LoraError);
 	PyModule_AddObject(m, "error", LoraError);
+
+	// Export sync word constants
+	PyModule_AddIntConstant(m, "SYNC_WORD_FACTORY", SYNC_WORD_FACTORY);
+	PyModule_AddIntConstant(m, "SYNC_WORD_LORAWAN", SYNC_WORD_LORAWAN);
 
 	return m;
 }

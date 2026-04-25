@@ -1,28 +1,34 @@
-# dragino lora testing
-# Single lora testing app
-
-CC=g++
-CFLAGS=-c -Wall -pedantic
+CC=gcc
+CFLAGS=-fPIC -c -Wall -pedantic
 LIBS=-lwiringPi
-PYTHONVER=python3.7
+PYTHONVER=python3.13
+PYTHONPATH=/usr/include/$(PYTHONVER)/
 
-all: lora_app loralib
+# Check if we are building for Docker
+ifdef TARGET
+	ifeq ($(TARGET),DOCKER)
+		PYTHONPATH=/usr/local/include/$(PYTHONVER)/
+$(info Building for docker)
+	endif
+endif
+
+all: lora_app liblora
 
 app: lora_app
 
-lib: loralib
+lib: liblora
 
 lora_app: lora.o
-	$(CC) lora.o  $(LIBS) -L/usr/lib/$(PYTHONVER)/ -o lora_app.exe
+	$(CC) lora.o  $(LIBS) -L$(PYTHONPATH) -o lora_app.exe
 
-lora.o: lora.c
-	$(CC) $(CFLAGS) -I/usr/include/$(PYTHONVER) lora.c
+lora.o: loralib.c
+	$(CC) $(CFLAGS) -I$(PYTHONPATH) loralib.c -o lora.o
 
-loralib.o: lora.c
-	$(CC) $(CFLAGS) -DPYTHONMODULE lora.c -I/usr/include/$(PYTHONVER) -o loralib.o 
+liblora.o: loralib.c
+	$(CC) $(CFLAGS) -DPYTHONMODULE loralib.c -I$(PYTHONPATH) -o liblora.o 
 
-loralib: loralib.o
-	$(CC) -shared loralib.o -L/usr/lib/$(PYTHONVER)/ $(LIBS) -o loralib.so
+liblora: liblora.o
+	$(CC) -shared liblora.o -L/usr/lib/$(PYTHONVER)/ $(LIBS) -o liblora.so
 
 clean:
 	rm -f *.o *.so *.exe
